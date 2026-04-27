@@ -291,6 +291,21 @@ button:active { transform: scale(0.93); }
   flex-shrink: 0;
 }
 
+.btn-edit-task {
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.task-card:hover .btn-edit-task,
+.task-card:focus-within .btn-edit-task { opacity: 1; }
+.btn-edit-task:hover { color: var(--accent); }
+/* Always visible on touch devices (no hover) */
+@media (hover: none) {
+  .btn-edit-task { opacity: 1; }
+}
+
 .task-timer {
   font-family: var(--mono);
   font-size: 0.88rem;

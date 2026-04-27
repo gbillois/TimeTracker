@@ -22,11 +22,6 @@ let editTaskId = null;
 let editArchiveConfirm = false;
 let editArchiveTimer = null;
 
-/* ── Long press ──────────────────────────────────────────────────────────── */
-let longPressTimer = null;
-let longPressTriggered = false;
-const LONG_PRESS_MS = 500;
-
 /* ── Color palette ───────────────────────────────────────────────────────── */
 const COLORS = [
   '#6BA8E8', '#E87272', '#52C48A', '#E8A45A',
@@ -327,10 +322,6 @@ function updateHeader() {
 /* ── Tracker structure render ────────────────────────────────────────────── */
 
 function renderStructure() {
-  clearTimeout(longPressTimer);
-  longPressTimer = null;
-  longPressTriggered = false;
-
   const root = document.getElementById('app-root');
   root.innerHTML = '';
 
@@ -409,6 +400,7 @@ function buildTaskEl(task) {
       ${task.notes ? `<span class="task-note-dot" title="${esc(task.notes)}">●</span>` : ''}
     </div>
     <div class="task-right">
+      <button class="btn-edit-task btn-icon-sm" title="Modifier">…</button>
       <span class="task-timer" data-timer-id="${task.id}">${formatMs(computeMs(task))}</span>
       <button class="btn-delete-task btn-icon-sm danger" title="Supprimer">✕</button>
     </div>
@@ -416,25 +408,15 @@ function buildTaskEl(task) {
 
   /* Tap = start/pause */
   li.addEventListener('click', e => {
-    if (e.target.closest('.btn-delete-task')) return;
-    if (longPressTriggered) { longPressTriggered = false; return; }
+    if (e.target.closest('.btn-edit-task') || e.target.closest('.btn-delete-task')) return;
     dispatch({ type: 'TAP_TASK', taskId: task.id });
   });
 
-  /* Long press = edit sheet */
-  li.addEventListener('pointerdown', e => {
-    if (e.target.closest('.btn-delete-task')) return;
-    longPressTriggered = false;
-    longPressTimer = setTimeout(() => {
-      longPressTriggered = true;
-      navigator.vibrate && navigator.vibrate(30);
-      openEditSheet(task.id);
-    }, LONG_PRESS_MS);
+  /* Edit button */
+  li.querySelector('.btn-edit-task').addEventListener('click', e => {
+    e.stopPropagation();
+    openEditSheet(task.id);
   });
-  const cancelLP = () => clearTimeout(longPressTimer);
-  li.addEventListener('pointerup',     cancelLP);
-  li.addEventListener('pointercancel', cancelLP);
-  li.addEventListener('pointermove',   cancelLP);
 
   /* Delete */
   li.querySelector('.btn-delete-task').addEventListener('click', e => {
