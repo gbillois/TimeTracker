@@ -10,6 +10,7 @@ let state = {
 
 let structureDirty = true;
 let currentView = 'tracker'; // 'tracker' | 'stats'
+let statsPeriod = 'total'; // 'total' | 'day' | 'week' | 'month'
 
 /* ── Modal context ───────────────────────────────────────────────────────── */
 let modalMode = null;     // 'group' | 'task'
@@ -21,15 +22,10 @@ let editTaskId = null;
 let editArchiveConfirm = false;
 let editArchiveTimer = null;
 
-/* ── Long press ──────────────────────────────────────────────────────────── */
-let longPressTimer = null;
-let longPressTriggered = false;
-const LONG_PRESS_MS = 500;
-
 /* ── Color palette ───────────────────────────────────────────────────────── */
 const COLORS = [
-  '#4A90E2', '#E24A4A', '#4ACE7A', '#E2974A',
-  '#974AE2', '#4AE2D9', '#E2CC4A', '#E24A97'
+  '#6BA8E8', '#E87272', '#52C48A', '#E8A45A',
+  '#9B6EE0', '#3DBFBA', '#D4A843', '#E07AB2'
 ];
 let selectedColor = COLORS[0];
 
@@ -42,7 +38,11 @@ function loadState() {
     const parsed = JSON.parse(raw);
     // Migration: ensure all tasks have archived field
     (parsed.groups || []).forEach(g =>
-      (g.tasks || []).forEach(t => { if (t.archived === undefined) t.archived = false; })
+      (g.tasks || []).forEach(t => {
+        if (t.archived === undefined) t.archived = false;
+        if (!t.sessions) t.sessions = [];
+        if (t.notes === undefined) t.notes = '';
+      })
     );
     state = { globalPaused: false, ...parsed };
   } catch (e) {
@@ -93,6 +93,52 @@ function groupTotal(group) {
   return group.tasks.reduce((s, t) => s + computeMs(t), 0);
 }
 
+function startOfDay() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function startOfWeek() {
+  const d = new Date();
+  const day = d.getDay(); // 0=dim, 1=lun, ...
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1)); // recule au lundi
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function startOfMonth() {
+  const d = new Date();
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function sinceForPeriod() {
+  if (statsPeriod === 'day')   return startOfDay();
+  if (statsPeriod === 'week')  return startOfWeek();
+  if (statsPeriod === 'month') return startOfMonth();
+  return 0;
+}
+
+function computeMsPeriod(task, since) {
+  if (since === 0) return computeMs(task);
+  let ms = 0;
+  for (const s of (task.sessions || [])) {
+    if (s.end > since) {
+      ms += s.end - Math.max(s.start, since);
+    }
+  }
+  if (task.startedAt) {
+    ms += Date.now() - Math.max(task.startedAt, since);
+  }
+  return Math.max(0, ms);
+}
+
+function groupTotalPeriod(group, since) {
+  return group.tasks.reduce((sum, t) => sum + computeMsPeriod(t, since), 0);
+}
+
 function findTask(taskId) {
   for (const g of state.groups) {
     const t = g.tasks.find(t => t.id === taskId);
@@ -109,13 +155,19 @@ function esc(str) {
     .replace(/"/g, '&quot;');
 }
 
+function pauseTask(task) {
+  if (!task.startedAt) return;
+  const now = Date.now();
+  if (!task.sessions) task.sessions = [];
+  task.sessions.push({ start: task.startedAt, end: now });
+  task.totalMs += now - task.startedAt;
+  task.startedAt = null;
+}
+
 function pauseActiveTask() {
   if (!state.activeTaskId) return;
   const found = findTask(state.activeTaskId);
-  if (found) {
-    found.task.totalMs += Date.now() - found.task.startedAt;
-    found.task.startedAt = null;
-  }
+  if (found) pauseTask(found.task);
   state.activeTaskId = null;
 }
 
@@ -132,8 +184,7 @@ function dispatch(action) {
 
       if (state.activeTaskId === action.taskId) {
         // Pause this task
-        task.totalMs += Date.now() - task.startedAt;
-        task.startedAt = null;
+        pauseTask(task);
         state.activeTaskId = null;
       } else {
         pauseActiveTask();
@@ -175,7 +226,7 @@ function dispatch(action) {
       const names = action.names || (action.name ? [action.name] : []);
       names.forEach(name => {
         name = name.trim();
-        if (name) g.tasks.push({ id: uid(), name, totalMs: 0, startedAt: null, archived: false });
+        if (name) g.tasks.push({ id: uid(), name, totalMs: 0, startedAt: null, archived: false, sessions: [], notes: '' });
       });
       structureDirty = true;
       break;
@@ -193,8 +244,9 @@ function dispatch(action) {
       if (!found) return;
       const { task } = found;
       if (state.activeTaskId === action.taskId) pauseActiveTask();
-      if (action.name)              task.name    = action.name;
+      if (action.name !== undefined)    task.name    = action.name;
       if (action.totalMs !== undefined) task.totalMs = action.totalMs;
+      if (action.notes !== undefined)   task.notes   = action.notes;
       structureDirty = true;
       break;
     }
@@ -236,7 +288,7 @@ function render() {
       renderTimers();
     }
   } else {
-    if (structureDirty) {
+    if (structureDirty || state.activeTaskId) {
       renderStats();
       structureDirty = false;
     }
@@ -270,10 +322,6 @@ function updateHeader() {
 /* ── Tracker structure render ────────────────────────────────────────────── */
 
 function renderStructure() {
-  clearTimeout(longPressTimer);
-  longPressTimer = null;
-  longPressTriggered = false;
-
   const root = document.getElementById('app-root');
   root.innerHTML = '';
 
@@ -349,8 +397,10 @@ function buildTaskEl(task) {
     <div class="task-main">
       <span class="task-run-dot"></span>
       <span class="task-name">${esc(task.name)}</span>
+      ${task.notes ? `<span class="task-note-dot" title="${esc(task.notes)}">●</span>` : ''}
     </div>
     <div class="task-right">
+      <button class="btn-edit-task btn-icon-sm" title="Modifier">…</button>
       <span class="task-timer" data-timer-id="${task.id}">${formatMs(computeMs(task))}</span>
       <button class="btn-delete-task btn-icon-sm danger" title="Supprimer">✕</button>
     </div>
@@ -358,25 +408,15 @@ function buildTaskEl(task) {
 
   /* Tap = start/pause */
   li.addEventListener('click', e => {
-    if (e.target.closest('.btn-delete-task')) return;
-    if (longPressTriggered) { longPressTriggered = false; return; }
+    if (e.target.closest('.btn-edit-task') || e.target.closest('.btn-delete-task')) return;
     dispatch({ type: 'TAP_TASK', taskId: task.id });
   });
 
-  /* Long press = edit sheet */
-  li.addEventListener('pointerdown', e => {
-    if (e.target.closest('.btn-delete-task')) return;
-    longPressTriggered = false;
-    longPressTimer = setTimeout(() => {
-      longPressTriggered = true;
-      navigator.vibrate && navigator.vibrate(30);
-      openEditSheet(task.id);
-    }, LONG_PRESS_MS);
+  /* Edit button */
+  li.querySelector('.btn-edit-task').addEventListener('click', e => {
+    e.stopPropagation();
+    openEditSheet(task.id);
   });
-  const cancelLP = () => clearTimeout(longPressTimer);
-  li.addEventListener('pointerup',     cancelLP);
-  li.addEventListener('pointercancel', cancelLP);
-  li.addEventListener('pointermove',   cancelLP);
 
   /* Delete */
   li.querySelector('.btn-delete-task').addEventListener('click', e => {
@@ -414,17 +454,45 @@ function renderStats() {
   const root = document.getElementById('app-root');
   root.innerHTML = '';
 
+  const since = sinceForPeriod();
+
+  // Period tabs
+  const tabs = document.createElement('div');
+  tabs.className = 'stats-tabs';
+  [['total', 'Total'], ['day', 'Jour'], ['week', 'Semaine'], ['month', 'Mois']].forEach(([key, label]) => {
+    const btn = document.createElement('button');
+    btn.className = `stats-tab${statsPeriod === key ? ' active' : ''}`;
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      if (statsPeriod === key) return;
+      statsPeriod = key;
+      renderStats();
+    });
+    tabs.appendChild(btn);
+  });
+  root.appendChild(tabs);
+
   if (state.groups.length === 0) {
-    root.innerHTML = `<div class="empty-state"><p>Aucune donnée à afficher.</p></div>`;
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.innerHTML = '<p>Aucune donnée à afficher.</p>';
+    root.appendChild(empty);
     return;
   }
 
   let grandTotal = 0;
-  const sorted = [...state.groups].sort((a, b) => groupTotal(b) - groupTotal(a));
+  let groupsRendered = 0;
+  const sorted = [...state.groups]
+    .sort((a, b) => groupTotalPeriod(b, since) - groupTotalPeriod(a, since));
 
   for (const group of sorted) {
-    const total = groupTotal(group);
+    const total = groupTotalPeriod(group, since);
+
+    // In period views, skip groups with no activity
+    if (since > 0 && total === 0) continue;
+
     grandTotal += total;
+    groupsRendered++;
 
     const section = document.createElement('section');
     section.className = 'stats-group';
@@ -441,11 +509,15 @@ function renderStats() {
     const ul = document.createElement('ul');
     ul.className = 'stats-task-list';
 
-    const active   = [...group.tasks].filter(t => !t.archived).sort((a, b) => computeMs(b) - computeMs(a));
-    const archived = [...group.tasks].filter(t =>  t.archived).sort((a, b) => computeMs(b) - computeMs(a));
+    const active = [...group.tasks]
+      .filter(t => !t.archived && (since === 0 || computeMsPeriod(t, since) > 0))
+      .sort((a, b) => computeMsPeriod(b, since) - computeMsPeriod(a, since));
+    const archived = [...group.tasks]
+      .filter(t => t.archived && (since === 0 || computeMsPeriod(t, since) > 0))
+      .sort((a, b) => computeMsPeriod(b, since) - computeMsPeriod(a, since));
 
     for (const task of active) {
-      ul.appendChild(buildStatsRow(task, false));
+      ul.appendChild(buildStatsRow(task, false, since));
     }
 
     if (archived.length > 0) {
@@ -453,25 +525,61 @@ function renderStats() {
       label.className = 'stats-section-label';
       label.textContent = 'Archivées';
       ul.appendChild(label);
-      for (const task of archived) ul.appendChild(buildStatsRow(task, true));
+      for (const task of archived) ul.appendChild(buildStatsRow(task, true, since));
     }
 
     section.appendChild(ul);
     root.appendChild(section);
   }
 
-  const footer = document.createElement('div');
-  footer.className = 'stats-footer';
-  footer.innerHTML = `<span>Total général</span><span class="stats-footer-time">${formatMs(grandTotal)}</span>`;
-  root.appendChild(footer);
+  if (groupsRendered === 0 && since > 0) {
+    const msgs = { day: "Aucune activité aujourd'hui.", week: 'Aucune activité cette semaine.', month: 'Aucune activité ce mois-ci.' };
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.innerHTML = `<p>${msgs[statsPeriod] || ''}</p>`;
+    root.appendChild(empty);
+  } else {
+    const footer = document.createElement('div');
+    footer.className = 'stats-footer';
+    const footerLabels = { day: "Aujourd'hui", week: 'Cette semaine', month: 'Ce mois', total: 'Total général' };
+    footer.innerHTML = `<span>${footerLabels[statsPeriod]}</span><span class="stats-footer-time">${formatMs(grandTotal)}</span>`;
+    root.appendChild(footer);
+  }
+
+  const dataBar = document.createElement('div');
+  dataBar.className = 'stats-data-bar';
+  dataBar.innerHTML = `
+    <button class="btn-data" id="btn-export" title="Exporter les données">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      Exporter
+    </button>
+    <button class="btn-data" id="btn-import" title="Importer des données">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 5 17 10"/>
+        <line x1="12" y1="5" x2="12" y2="17"/>
+      </svg>
+      Importer
+    </button>
+  `;
+  root.appendChild(dataBar);
+  dataBar.querySelector('#btn-export').addEventListener('click', exportData);
+  dataBar.querySelector('#btn-import').addEventListener('click', importData);
 }
 
-function buildStatsRow(task, isArchived) {
+function buildStatsRow(task, isArchived, since = 0) {
   const li = document.createElement('li');
   li.className = `stats-task-row${isArchived ? ' archived' : ''}`;
   li.innerHTML = `
-    <span class="stats-task-name">${esc(task.name)}</span>
-    <span class="stats-task-time">${formatMs(computeMs(task))}</span>
+    <div class="stats-task-info">
+      <span class="stats-task-name">${esc(task.name)}</span>
+      ${task.notes ? `<span class="stats-task-notes">${esc(task.notes)}</span>` : ''}
+    </div>
+    <span class="stats-task-time">${formatMs(computeMsPeriod(task, since))}</span>
     ${isArchived ? `<button class="btn-unarchive btn-icon-sm" title="Désarchiver">↩</button>` : ''}
   `;
   if (isArchived) {
@@ -581,8 +689,9 @@ function openEditSheet(taskId) {
   if (!found) return;
   const { task } = found;
 
-  document.getElementById('edit-name').value = task.name;
-  document.getElementById('edit-time').value = formatMs(computeMs(task));
+  document.getElementById('edit-name').value  = task.name;
+  document.getElementById('edit-time').value  = formatMs(computeMs(task));
+  document.getElementById('edit-notes').value = task.notes || '';
 
   const archBtn = document.getElementById('edit-archive');
   archBtn.textContent = 'Archiver';
@@ -604,7 +713,8 @@ function confirmEdit() {
   const name    = document.getElementById('edit-name').value.trim();
   const timeStr = document.getElementById('edit-time').value;
   const totalMs = parseTimeInput(timeStr);
-  dispatch({ type: 'EDIT_TASK', taskId: editTaskId, name: name || undefined, totalMs });
+  const notes   = document.getElementById('edit-notes').value.trim();
+  dispatch({ type: 'EDIT_TASK', taskId: editTaskId, name: name || undefined, totalMs, notes });
   closeEditSheet();
 }
 
@@ -639,6 +749,53 @@ function hideOverlay(id) {
   const el = document.getElementById(id);
   el.classList.remove('open');
   setTimeout(() => el.classList.add('hidden'), 280);
+}
+
+/* ── Export / Import ─────────────────────────────────────────────────────── */
+
+function exportData() {
+  const payload = JSON.stringify({ version: 1, exported: new Date().toISOString(), ...state }, null, 2);
+  const blob = new Blob([payload], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `timetracker-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importData() {
+  const input    = document.createElement('input');
+  input.type     = 'file';
+  input.accept   = '.json,application/json';
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!Array.isArray(parsed.groups)) throw new Error('Format invalide');
+        parsed.groups.forEach(g =>
+          (g.tasks || []).forEach(t => {
+            if (t.archived === undefined) t.archived = false;
+            if (!t.sessions) t.sessions = [];
+            if (t.notes === undefined) t.notes = '';
+          })
+        );
+        state = { globalPaused: false, activeTaskId: null, ...parsed };
+        delete state.version;
+        delete state.exported;
+        saveState();
+        structureDirty = true;
+        render();
+      } catch (e) {
+        alert("Erreur d'importation : " + e.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+  input.click();
 }
 
 /* ── Event wiring ────────────────────────────────────────────────────────── */

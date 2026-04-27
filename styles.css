@@ -3,16 +3,16 @@
 
 /* ── Design tokens ───────────────────────────────────────────────────────── */
 :root {
-  --bg:              #0f0f13;
-  --surface:         #1a1a24;
-  --surface-raised:  #22222f;
-  --surface-hover:   #2a2a3a;
-  --text:            #f0f0f5;
-  --text-muted:      #7a7a99;
-  --accent:          #4A90E2;
-  --danger:          #e24a4a;
+  --bg:              #f0f4fb;
+  --surface:         #ffffff;
+  --surface-raised:  #e8edf7;
+  --surface-hover:   #dde5f5;
+  --text:            #1e2340;
+  --text-muted:      #7480a8;
+  --accent:          #5b8dee;
+  --danger:          #e05c5c;
   --danger-dark:     #b83030;
-  --border:          #2a2a3c;
+  --border:          #d0d8ee;
   --radius:          14px;
   --radius-sm:       8px;
   --gap:             16px;
@@ -22,7 +22,7 @@
 }
 
 /* ── Base ────────────────────────────────────────────────────────────────── */
-html { color-scheme: dark; height: 100%; }
+html { color-scheme: light; height: 100%; }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -291,6 +291,21 @@ button:active { transform: scale(0.93); }
   flex-shrink: 0;
 }
 
+.btn-edit-task {
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.task-card:hover .btn-edit-task,
+.task-card:focus-within .btn-edit-task { opacity: 1; }
+.btn-edit-task:hover { color: var(--accent); }
+/* Always visible on touch devices (no hover) */
+@media (hover: none) {
+  .btn-edit-task { opacity: 1; }
+}
+
 .task-timer {
   font-family: var(--mono);
   font-size: 0.88rem;
@@ -395,7 +410,8 @@ button:active { transform: scale(0.93); }
 #modal-input,
 #modal-bulk,
 #edit-name,
-#edit-time {
+#edit-time,
+#edit-notes {
   background: var(--surface);
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
@@ -411,8 +427,16 @@ button:active { transform: scale(0.93); }
 #modal-input:focus,
 #modal-bulk:focus,
 #edit-name:focus,
-#edit-time:focus {
+#edit-time:focus,
+#edit-notes:focus {
   border-color: var(--accent);
+}
+
+#edit-notes {
+  min-height: 72px;
+  resize: vertical;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 #modal-bulk {
@@ -530,8 +554,8 @@ button:active { transform: scale(0.93); }
 .stats-task-row:last-child { border-bottom: none; }
 .stats-task-row.archived   { opacity: 0.5; }
 
+/* .stats-task-name flex managed by .stats-task-info when notes present */
 .stats-task-name {
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -579,3 +603,77 @@ button:active { transform: scale(0.93); }
   flex-shrink: 0;
 }
 .btn-unarchive:hover { color: var(--accent); }
+
+/* ── Stats period tabs ───────────────────────────────────────────────────── */
+.stats-tabs {
+  display: flex;
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.stats-tab {
+  flex: 1;
+  padding: 10px 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: 0;
+  text-align: center;
+  transition: color 0.15s, background 0.15s;
+}
+.stats-tab + .stats-tab { border-left: 1px solid var(--border); }
+.stats-tab:hover  { background: var(--surface-hover); color: var(--text); }
+.stats-tab.active { background: var(--surface-raised); color: var(--accent); }
+
+/* ── Stats data bar (export/import) ──────────────────────────────────────── */
+.stats-data-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-data {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition: background 0.14s, color 0.14s;
+}
+.btn-data:hover { background: var(--surface-hover); color: var(--text); }
+
+/* ── Task note indicator ─────────────────────────────────────────────────── */
+.task-note-dot {
+  font-size: 0.45rem;
+  color: var(--accent);
+  opacity: 0.7;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+/* ── Stats task notes ────────────────────────────────────────────────────── */
+.stats-task-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.stats-task-info .stats-task-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats-task-notes {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
