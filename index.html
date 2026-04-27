@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#4A90E2">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TimeTracker">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>TimeTracker</title>
+</head>
+<body>
+  <header id="app-header">
+    <button id="btn-global-pause" class="btn-icon" title="Pause générale">
+      <svg id="icon-pause" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>
+      </svg>
+      <svg id="icon-play" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="hidden">
+        <polygon points="5,3 19,12 5,21"/>
+      </svg>
+    </button>
+
+    <h1 id="app-title">TimeTracker</h1>
+
+    <div class="header-right">
+      <button id="btn-stats" class="btn-icon" title="Statistiques">
+        <svg id="icon-stats" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <rect x="18" y="3" width="3" height="18" rx="1"/><rect x="10.5" y="8" width="3" height="13" rx="1"/><rect x="3" y="13" width="3" height="8" rx="1"/>
+        </svg>
+        <svg id="icon-back" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="hidden">
+          <polyline points="15,18 9,12 15,6"/>
+        </svg>
+      </button>
+      <button id="btn-add-group" class="btn-text" title="Nouveau groupe">+ Groupe</button>
+    </div>
+  </header>
+
+  <div id="global-pause-banner" class="hidden">⏸ EN PAUSE</div>
+
+  <main id="app-root"></main>
+
+  <!-- Modal : ajouter groupe / tâche -->
+  <div id="modal-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div id="modal-box">
+      <h3 id="modal-title"></h3>
+      <input id="modal-input" type="text" autocomplete="off" spellcheck="false">
+      <div id="modal-color-row" class="hidden">
+        <label>Couleur</label>
+        <div id="color-swatches"></div>
+      </div>
+      <div id="modal-bulk-row" class="hidden">
+        <button id="btn-toggle-bulk" class="btn-link">Ajouter plusieurs tâches à la fois →</button>
+        <textarea id="modal-bulk" class="hidden" placeholder="Une tâche par ligne&#10;Facture Grosjean&#10;Facture Dupont&#10;Facture Martin"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button id="modal-cancel">Annuler</button>
+        <button id="modal-confirm" class="btn-primary">Ajouter</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feuille d'édition de tâche (long appui) -->
+  <div id="edit-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+    <div id="edit-box">
+      <h3 id="edit-title">Modifier la tâche</h3>
+      <div class="edit-row">
+        <label for="edit-name">Nom</label>
+        <input id="edit-name" type="text" autocomplete="off">
+      </div>
+      <div class="edit-row">
+        <label for="edit-time">Temps (HH:MM:SS)</label>
+        <input id="edit-time" type="text" inputmode="numeric" placeholder="01:30:00">
+      </div>
+      <div class="modal-actions">
+        <button id="edit-archive" class="btn-danger">Archiver</button>
+        <button id="edit-cancel">Annuler</button>
+        <button id="edit-confirm" class="btn-primary">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
