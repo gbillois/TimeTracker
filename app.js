@@ -10,7 +10,7 @@ let state = {
 
 let structureDirty = true;
 let currentView = 'tracker'; // 'tracker' | 'stats'
-let statsPeriod = 'total'; // 'total' | 'day' | 'month'
+let statsPeriod = 'total'; // 'total' | 'day' | 'week' | 'month'
 
 /* ── Modal context ───────────────────────────────────────────────────────── */
 let modalMode = null;     // 'group' | 'task'
@@ -46,6 +46,7 @@ function loadState() {
       (g.tasks || []).forEach(t => {
         if (t.archived === undefined) t.archived = false;
         if (!t.sessions) t.sessions = [];
+        if (t.notes === undefined) t.notes = '';
       })
     );
     state = { globalPaused: false, ...parsed };
@@ -103,6 +104,14 @@ function startOfDay() {
   return d.getTime();
 }
 
+function startOfWeek() {
+  const d = new Date();
+  const day = d.getDay(); // 0=dim, 1=lun, ...
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1)); // recule au lundi
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 function startOfMonth() {
   const d = new Date();
   d.setDate(1);
@@ -112,6 +121,7 @@ function startOfMonth() {
 
 function sinceForPeriod() {
   if (statsPeriod === 'day')   return startOfDay();
+  if (statsPeriod === 'week')  return startOfWeek();
   if (statsPeriod === 'month') return startOfMonth();
   return 0;
 }
@@ -221,7 +231,7 @@ function dispatch(action) {
       const names = action.names || (action.name ? [action.name] : []);
       names.forEach(name => {
         name = name.trim();
-        if (name) g.tasks.push({ id: uid(), name, totalMs: 0, startedAt: null, archived: false, sessions: [] });
+        if (name) g.tasks.push({ id: uid(), name, totalMs: 0, startedAt: null, archived: false, sessions: [], notes: '' });
       });
       structureDirty = true;
       break;
@@ -239,8 +249,9 @@ function dispatch(action) {
       if (!found) return;
       const { task } = found;
       if (state.activeTaskId === action.taskId) pauseActiveTask();
-      if (action.name)              task.name    = action.name;
+      if (action.name !== undefined)    task.name    = action.name;
       if (action.totalMs !== undefined) task.totalMs = action.totalMs;
+      if (action.notes !== undefined)   task.notes   = action.notes;
       structureDirty = true;
       break;
     }
@@ -395,6 +406,7 @@ function buildTaskEl(task) {
     <div class="task-main">
       <span class="task-run-dot"></span>
       <span class="task-name">${esc(task.name)}</span>
+      ${task.notes ? `<span class="task-note-dot" title="${esc(task.notes)}">●</span>` : ''}
     </div>
     <div class="task-right">
       <span class="task-timer" data-timer-id="${task.id}">${formatMs(computeMs(task))}</span>
@@ -465,7 +477,7 @@ function renderStats() {
   // Period tabs
   const tabs = document.createElement('div');
   tabs.className = 'stats-tabs';
-  [['total', 'Total'], ['day', 'Jour'], ['month', 'Mois']].forEach(([key, label]) => {
+  [['total', 'Total'], ['day', 'Jour'], ['week', 'Semaine'], ['month', 'Mois']].forEach(([key, label]) => {
     const btn = document.createElement('button');
     btn.className = `stats-tab${statsPeriod === key ? ' active' : ''}`;
     btn.textContent = label;
@@ -539,26 +551,52 @@ function renderStats() {
   }
 
   if (groupsRendered === 0 && since > 0) {
-    const msg = statsPeriod === 'day' ? "Aucune activité aujourd'hui." : 'Aucune activité ce mois-ci.';
+    const msgs = { day: "Aucune activité aujourd'hui.", week: 'Aucune activité cette semaine.', month: 'Aucune activité ce mois-ci.' };
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.innerHTML = `<p>${msg}</p>`;
+    empty.innerHTML = `<p>${msgs[statsPeriod] || ''}</p>`;
     root.appendChild(empty);
-    return;
+  } else {
+    const footer = document.createElement('div');
+    footer.className = 'stats-footer';
+    const footerLabels = { day: "Aujourd'hui", week: 'Cette semaine', month: 'Ce mois', total: 'Total général' };
+    footer.innerHTML = `<span>${footerLabels[statsPeriod]}</span><span class="stats-footer-time">${formatMs(grandTotal)}</span>`;
+    root.appendChild(footer);
   }
 
-  const footer = document.createElement('div');
-  footer.className = 'stats-footer';
-  const footerLabel = statsPeriod === 'day' ? "Aujourd'hui" : statsPeriod === 'month' ? 'Ce mois' : 'Total général';
-  footer.innerHTML = `<span>${footerLabel}</span><span class="stats-footer-time">${formatMs(grandTotal)}</span>`;
-  root.appendChild(footer);
+  const dataBar = document.createElement('div');
+  dataBar.className = 'stats-data-bar';
+  dataBar.innerHTML = `
+    <button class="btn-data" id="btn-export" title="Exporter les données">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      Exporter
+    </button>
+    <button class="btn-data" id="btn-import" title="Importer des données">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 5 17 10"/>
+        <line x1="12" y1="5" x2="12" y2="17"/>
+      </svg>
+      Importer
+    </button>
+  `;
+  root.appendChild(dataBar);
+  dataBar.querySelector('#btn-export').addEventListener('click', exportData);
+  dataBar.querySelector('#btn-import').addEventListener('click', importData);
 }
 
 function buildStatsRow(task, isArchived, since = 0) {
   const li = document.createElement('li');
   li.className = `stats-task-row${isArchived ? ' archived' : ''}`;
   li.innerHTML = `
-    <span class="stats-task-name">${esc(task.name)}</span>
+    <div class="stats-task-info">
+      <span class="stats-task-name">${esc(task.name)}</span>
+      ${task.notes ? `<span class="stats-task-notes">${esc(task.notes)}</span>` : ''}
+    </div>
     <span class="stats-task-time">${formatMs(computeMsPeriod(task, since))}</span>
     ${isArchived ? `<button class="btn-unarchive btn-icon-sm" title="Désarchiver">↩</button>` : ''}
   `;
@@ -669,8 +707,9 @@ function openEditSheet(taskId) {
   if (!found) return;
   const { task } = found;
 
-  document.getElementById('edit-name').value = task.name;
-  document.getElementById('edit-time').value = formatMs(computeMs(task));
+  document.getElementById('edit-name').value  = task.name;
+  document.getElementById('edit-time').value  = formatMs(computeMs(task));
+  document.getElementById('edit-notes').value = task.notes || '';
 
   const archBtn = document.getElementById('edit-archive');
   archBtn.textContent = 'Archiver';
@@ -692,7 +731,8 @@ function confirmEdit() {
   const name    = document.getElementById('edit-name').value.trim();
   const timeStr = document.getElementById('edit-time').value;
   const totalMs = parseTimeInput(timeStr);
-  dispatch({ type: 'EDIT_TASK', taskId: editTaskId, name: name || undefined, totalMs });
+  const notes   = document.getElementById('edit-notes').value.trim();
+  dispatch({ type: 'EDIT_TASK', taskId: editTaskId, name: name || undefined, totalMs, notes });
   closeEditSheet();
 }
 
@@ -727,6 +767,53 @@ function hideOverlay(id) {
   const el = document.getElementById(id);
   el.classList.remove('open');
   setTimeout(() => el.classList.add('hidden'), 280);
+}
+
+/* ── Export / Import ─────────────────────────────────────────────────────── */
+
+function exportData() {
+  const payload = JSON.stringify({ version: 1, exported: new Date().toISOString(), ...state }, null, 2);
+  const blob = new Blob([payload], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `timetracker-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importData() {
+  const input    = document.createElement('input');
+  input.type     = 'file';
+  input.accept   = '.json,application/json';
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!Array.isArray(parsed.groups)) throw new Error('Format invalide');
+        parsed.groups.forEach(g =>
+          (g.tasks || []).forEach(t => {
+            if (t.archived === undefined) t.archived = false;
+            if (!t.sessions) t.sessions = [];
+            if (t.notes === undefined) t.notes = '';
+          })
+        );
+        state = { globalPaused: false, activeTaskId: null, ...parsed };
+        delete state.version;
+        delete state.exported;
+        saveState();
+        structureDirty = true;
+        render();
+      } catch (e) {
+        alert("Erreur d'importation : " + e.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+  input.click();
 }
 
 /* ── Event wiring ────────────────────────────────────────────────────────── */
