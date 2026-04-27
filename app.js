@@ -10,6 +10,7 @@ let state = {
 
 let structureDirty = true;
 let currentView = 'tracker'; // 'tracker' | 'stats'
+let statsPeriod = 'total'; // 'total' | 'day' | 'month'
 
 /* ── Modal context ───────────────────────────────────────────────────────── */
 let modalMode = null;     // 'group' | 'task'
@@ -28,8 +29,8 @@ const LONG_PRESS_MS = 500;
 
 /* ── Color palette ───────────────────────────────────────────────────────── */
 const COLORS = [
-  '#4A90E2', '#E24A4A', '#4ACE7A', '#E2974A',
-  '#974AE2', '#4AE2D9', '#E2CC4A', '#E24A97'
+  '#6BA8E8', '#E87272', '#52C48A', '#E8A45A',
+  '#9B6EE0', '#3DBFBA', '#D4A843', '#E07AB2'
 ];
 let selectedColor = COLORS[0];
 
@@ -42,7 +43,10 @@ function loadState() {
     const parsed = JSON.parse(raw);
     // Migration: ensure all tasks have archived field
     (parsed.groups || []).forEach(g =>
-      (g.tasks || []).forEach(t => { if (t.archived === undefined) t.archived = false; })
+      (g.tasks || []).forEach(t => {
+        if (t.archived === undefined) t.archived = false;
+        if (!t.sessions) t.sessions = [];
+      })
     );
     state = { globalPaused: false, ...parsed };
   } catch (e) {
@@ -93,6 +97,43 @@ function groupTotal(group) {
   return group.tasks.reduce((s, t) => s + computeMs(t), 0);
 }
 
+function startOfDay() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function startOfMonth() {
+  const d = new Date();
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function sinceForPeriod() {
+  if (statsPeriod === 'day')   return startOfDay();
+  if (statsPeriod === 'month') return startOfMonth();
+  return 0;
+}
+
+function computeMsPeriod(task, since) {
+  if (since === 0) return computeMs(task);
+  let ms = 0;
+  for (const s of (task.sessions || [])) {
+    if (s.end > since) {
+      ms += s.end - Math.max(s.start, since);
+    }
+  }
+  if (task.startedAt) {
+    ms += Date.now() - Math.max(task.startedAt, since);
+  }
+  return Math.max(0, ms);
+}
+
+function groupTotalPeriod(group, since) {
+  return group.tasks.reduce((sum, t) => sum + computeMsPeriod(t, since), 0);
+}
+
 function findTask(taskId) {
   for (const g of state.groups) {
     const t = g.tasks.find(t => t.id === taskId);
@@ -109,13 +150,19 @@ function esc(str) {
     .replace(/"/g, '&quot;');
 }
 
+function pauseTask(task) {
+  if (!task.startedAt) return;
+  const now = Date.now();
+  if (!task.sessions) task.sessions = [];
+  task.sessions.push({ start: task.startedAt, end: now });
+  task.totalMs += now - task.startedAt;
+  task.startedAt = null;
+}
+
 function pauseActiveTask() {
   if (!state.activeTaskId) return;
   const found = findTask(state.activeTaskId);
-  if (found) {
-    found.task.totalMs += Date.now() - found.task.startedAt;
-    found.task.startedAt = null;
-  }
+  if (found) pauseTask(found.task);
   state.activeTaskId = null;
 }
 
@@ -132,8 +179,7 @@ function dispatch(action) {
 
       if (state.activeTaskId === action.taskId) {
         // Pause this task
-        task.totalMs += Date.now() - task.startedAt;
-        task.startedAt = null;
+        pauseTask(task);
         state.activeTaskId = null;
       } else {
         pauseActiveTask();
@@ -175,7 +221,7 @@ function dispatch(action) {
       const names = action.names || (action.name ? [action.name] : []);
       names.forEach(name => {
         name = name.trim();
-        if (name) g.tasks.push({ id: uid(), name, totalMs: 0, startedAt: null, archived: false });
+        if (name) g.tasks.push({ id: uid(), name, totalMs: 0, startedAt: null, archived: false, sessions: [] });
       });
       structureDirty = true;
       break;
@@ -236,7 +282,7 @@ function render() {
       renderTimers();
     }
   } else {
-    if (structureDirty) {
+    if (structureDirty || state.activeTaskId) {
       renderStats();
       structureDirty = false;
     }
@@ -414,17 +460,45 @@ function renderStats() {
   const root = document.getElementById('app-root');
   root.innerHTML = '';
 
+  const since = sinceForPeriod();
+
+  // Period tabs
+  const tabs = document.createElement('div');
+  tabs.className = 'stats-tabs';
+  [['total', 'Total'], ['day', 'Jour'], ['month', 'Mois']].forEach(([key, label]) => {
+    const btn = document.createElement('button');
+    btn.className = `stats-tab${statsPeriod === key ? ' active' : ''}`;
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      if (statsPeriod === key) return;
+      statsPeriod = key;
+      renderStats();
+    });
+    tabs.appendChild(btn);
+  });
+  root.appendChild(tabs);
+
   if (state.groups.length === 0) {
-    root.innerHTML = `<div class="empty-state"><p>Aucune donnée à afficher.</p></div>`;
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.innerHTML = '<p>Aucune donnée à afficher.</p>';
+    root.appendChild(empty);
     return;
   }
 
   let grandTotal = 0;
-  const sorted = [...state.groups].sort((a, b) => groupTotal(b) - groupTotal(a));
+  let groupsRendered = 0;
+  const sorted = [...state.groups]
+    .sort((a, b) => groupTotalPeriod(b, since) - groupTotalPeriod(a, since));
 
   for (const group of sorted) {
-    const total = groupTotal(group);
+    const total = groupTotalPeriod(group, since);
+
+    // In period views, skip groups with no activity
+    if (since > 0 && total === 0) continue;
+
     grandTotal += total;
+    groupsRendered++;
 
     const section = document.createElement('section');
     section.className = 'stats-group';
@@ -441,11 +515,15 @@ function renderStats() {
     const ul = document.createElement('ul');
     ul.className = 'stats-task-list';
 
-    const active   = [...group.tasks].filter(t => !t.archived).sort((a, b) => computeMs(b) - computeMs(a));
-    const archived = [...group.tasks].filter(t =>  t.archived).sort((a, b) => computeMs(b) - computeMs(a));
+    const active = [...group.tasks]
+      .filter(t => !t.archived && (since === 0 || computeMsPeriod(t, since) > 0))
+      .sort((a, b) => computeMsPeriod(b, since) - computeMsPeriod(a, since));
+    const archived = [...group.tasks]
+      .filter(t => t.archived && (since === 0 || computeMsPeriod(t, since) > 0))
+      .sort((a, b) => computeMsPeriod(b, since) - computeMsPeriod(a, since));
 
     for (const task of active) {
-      ul.appendChild(buildStatsRow(task, false));
+      ul.appendChild(buildStatsRow(task, false, since));
     }
 
     if (archived.length > 0) {
@@ -453,25 +531,35 @@ function renderStats() {
       label.className = 'stats-section-label';
       label.textContent = 'Archivées';
       ul.appendChild(label);
-      for (const task of archived) ul.appendChild(buildStatsRow(task, true));
+      for (const task of archived) ul.appendChild(buildStatsRow(task, true, since));
     }
 
     section.appendChild(ul);
     root.appendChild(section);
   }
 
+  if (groupsRendered === 0 && since > 0) {
+    const msg = statsPeriod === 'day' ? "Aucune activité aujourd'hui." : 'Aucune activité ce mois-ci.';
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.innerHTML = `<p>${msg}</p>`;
+    root.appendChild(empty);
+    return;
+  }
+
   const footer = document.createElement('div');
   footer.className = 'stats-footer';
-  footer.innerHTML = `<span>Total général</span><span class="stats-footer-time">${formatMs(grandTotal)}</span>`;
+  const footerLabel = statsPeriod === 'day' ? "Aujourd'hui" : statsPeriod === 'month' ? 'Ce mois' : 'Total général';
+  footer.innerHTML = `<span>${footerLabel}</span><span class="stats-footer-time">${formatMs(grandTotal)}</span>`;
   root.appendChild(footer);
 }
 
-function buildStatsRow(task, isArchived) {
+function buildStatsRow(task, isArchived, since = 0) {
   const li = document.createElement('li');
   li.className = `stats-task-row${isArchived ? ' archived' : ''}`;
   li.innerHTML = `
     <span class="stats-task-name">${esc(task.name)}</span>
-    <span class="stats-task-time">${formatMs(computeMs(task))}</span>
+    <span class="stats-task-time">${formatMs(computeMsPeriod(task, since))}</span>
     ${isArchived ? `<button class="btn-unarchive btn-icon-sm" title="Désarchiver">↩</button>` : ''}
   `;
   if (isArchived) {
