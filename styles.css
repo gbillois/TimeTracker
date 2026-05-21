@@ -365,7 +365,8 @@ body.edit-mode .drag-handle { display: flex; }
 body.edit-mode .task-card    { cursor: default; }
 body.edit-mode .task-card .btn-edit-task { display: none; }
 body.edit-mode #btn-add-group,
-body.edit-mode .group-header .btn-add-task { visibility: hidden; }
+body.edit-mode .group-header .btn-add-task,
+body.edit-mode .group-header .btn-duplicate-group { visibility: hidden; }
 
 body.edit-mode #btn-edit-mode {
   color: var(--accent);

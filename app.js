@@ -282,6 +282,29 @@ function dispatch(action) {
       break;
     }
 
+    case 'DUPLICATE_GROUP': {
+      const src = state.groups.find(g => g.id === action.sourceId);
+      if (!src) return;
+      const newGroup = {
+        id: uid(),
+        name: action.name,
+        color: action.color,
+        tasks: src.tasks.filter(t => !t.archived).map(t => ({
+          id: uid(),
+          name: t.name,
+          notes: t.notes || '',
+          totalMs: 0,
+          startedAt: null,
+          archived: false,
+          sessions: []
+        }))
+      };
+      const idx = state.groups.findIndex(g => g.id === action.sourceId);
+      state.groups.splice(idx + 1, 0, newGroup);
+      structureDirty = true;
+      break;
+    }
+
     case 'TICK':
       // No state mutation — just re-render timers
       break;
@@ -380,9 +403,18 @@ function buildGroupEl(group, activeTasks) {
     <span class="group-dot"></span>
     <span class="group-name">${esc(group.name)}</span>
     <span class="group-total" data-group-id="${group.id}">${formatMs(groupTotal(group))}</span>
+    <button class="btn-duplicate-group btn-icon-sm" title="Dupliquer le groupe">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="8" y="8" width="12" height="12" rx="2"/>
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>
+      </svg>
+    </button>
     <button class="btn-add-task btn-icon-sm" title="Ajouter une tâche">+</button>
     <button class="btn-delete-group btn-icon-sm danger" title="Supprimer le groupe">✕</button>
   `;
+  header.querySelector('.btn-duplicate-group').addEventListener('click', () =>
+    openModal('duplicate-group', group.id)
+  );
   header.querySelector('.btn-add-task').addEventListener('click', () => openModal('task', group.id));
   header.querySelector('.btn-delete-group').addEventListener('click', () =>
     animateDelete(section, () => dispatch({ type: 'DELETE_GROUP', groupId: group.id }))
@@ -720,6 +752,15 @@ function openModal(mode, groupId = null) {
     colorRow.classList.remove('hidden');
     bulkRow.classList.add('hidden');
     initColorSwatches();
+  } else if (mode === 'duplicate-group') {
+    const src = state.groups.find(g => g.id === groupId);
+    document.getElementById('modal-title').textContent = 'Dupliquer le groupe';
+    input.placeholder = 'Nom du nouveau groupe';
+    input.value = src ? `${src.name} (copie)` : '';
+    colorRow.classList.remove('hidden');
+    bulkRow.classList.add('hidden');
+    selectedColor = src ? src.color : selectedColor;
+    initColorSwatches();
   } else {
     document.getElementById('modal-title').textContent = 'Nouvelle tâche';
     input.placeholder = 'Nom de la tâche';
@@ -728,7 +769,10 @@ function openModal(mode, groupId = null) {
   }
 
   showOverlay('modal-overlay');
-  setTimeout(() => input.focus(), 120);
+  setTimeout(() => {
+    input.focus();
+    if (mode === 'duplicate-group') input.select();
+  }, 120);
 }
 
 function closeModal() { hideOverlay('modal-overlay'); }
@@ -738,6 +782,13 @@ function confirmModal() {
     const name = document.getElementById('modal-input').value.trim();
     if (!name) return;
     dispatch({ type: 'ADD_GROUP', name, color: selectedColor });
+    closeModal();
+    return;
+  }
+  if (modalMode === 'duplicate-group') {
+    const name = document.getElementById('modal-input').value.trim();
+    if (!name) return;
+    dispatch({ type: 'DUPLICATE_GROUP', sourceId: modalGroupId, name, color: selectedColor });
     closeModal();
     return;
   }
