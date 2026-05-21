@@ -180,6 +180,7 @@ button:active { transform: scale(0.93); }
   border-radius: var(--radius);
   border: 1px solid var(--border);
   overflow: hidden;
+  flex-shrink: 0;
   animation: fadeSlideIn 0.22s ease both;
 }
 
@@ -341,6 +342,47 @@ button:active { transform: scale(0.93); }
   animation: fadeSlideOut 0.24s ease both;
   overflow: hidden;
   pointer-events: none;
+}
+
+/* ── Edit mode (drag-to-reorder) ─────────────────────────────────────────── */
+.drag-handle {
+  display: none;
+  width: 28px;
+  height: 28px;
+  margin-right: 2px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.drag-handle:active { cursor: grabbing; }
+.drag-handle svg { pointer-events: none; }
+
+body.edit-mode .drag-handle { display: flex; }
+body.edit-mode .task-card    { cursor: default; }
+body.edit-mode .task-card .btn-edit-task { display: none; }
+body.edit-mode #btn-add-group,
+body.edit-mode .group-header .btn-add-task,
+body.edit-mode .group-header .btn-duplicate-group { visibility: hidden; }
+
+body.edit-mode #btn-edit-mode {
+  color: var(--accent);
+  background: var(--surface-hover);
+}
+
+body.edit-mode .task-card.dragging {
+  background: var(--surface-raised);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
+  z-index: 50;
+  position: relative;
+  border-radius: var(--radius-sm);
+  transition: none;
+}
+body.edit-mode .task-card.shifting {
+  transition: transform 0.18s ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -514,6 +556,7 @@ button:active { transform: scale(0.93); }
   border-radius: var(--radius);
   border: 1px solid var(--border);
   overflow: hidden;
+  flex-shrink: 0;
   animation: fadeSlideIn 0.22s ease both;
 }
 
