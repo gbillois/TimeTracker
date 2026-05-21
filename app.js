@@ -11,6 +11,7 @@ let state = {
 let structureDirty = true;
 let currentView = 'tracker'; // 'tracker' | 'stats'
 let statsPeriod = 'total'; // 'total' | 'day' | 'week' | 'month'
+let editMode = false;
 
 /* ── Modal context ───────────────────────────────────────────────────────── */
 let modalMode = null;     // 'group' | 'task'
@@ -267,6 +268,20 @@ function dispatch(action) {
       break;
     }
 
+    case 'REORDER_TASKS': {
+      const g = state.groups.find(g => g.id === action.groupId);
+      if (!g) return;
+      const active   = g.tasks.filter(t => !t.archived);
+      const archived = g.tasks.filter(t =>  t.archived);
+      if (action.fromIndex < 0 || action.fromIndex >= active.length) return;
+      const [moved] = active.splice(action.fromIndex, 1);
+      const toIdx = Math.max(0, Math.min(active.length, action.toIndex));
+      active.splice(toIdx, 0, moved);
+      g.tasks = [...active, ...archived];
+      structureDirty = true;
+      break;
+    }
+
     case 'TICK':
       // No state mutation — just re-render timers
       break;
@@ -315,8 +330,14 @@ function updateHeader() {
   document.getElementById('icon-back').classList.toggle('hidden',  !inStats);
   document.getElementById('btn-stats').title = inStats ? 'Retour' : 'Statistiques';
 
-  // Add-group button only in tracker view
+  // Add-group + edit-mode buttons only in tracker view
   document.getElementById('btn-add-group').classList.toggle('hidden', inStats);
+  document.getElementById('btn-edit-mode').classList.toggle('hidden', inStats);
+
+  // Edit-mode icon swap
+  document.getElementById('icon-edit-mode').classList.toggle('hidden',  editMode);
+  document.getElementById('icon-edit-done').classList.toggle('hidden', !editMode);
+  document.getElementById('btn-edit-mode').title = editMode ? 'Terminer' : 'Réorganiser les tâches';
 }
 
 /* ── Tracker structure render ────────────────────────────────────────────── */
@@ -380,20 +401,26 @@ function buildGroupEl(group, activeTasks) {
   }
 
   for (const task of activeTasks) {
-    ul.appendChild(buildTaskEl(task));
+    ul.appendChild(buildTaskEl(task, group.id));
   }
 
   section.appendChild(ul);
   return section;
 }
 
-function buildTaskEl(task) {
+function buildTaskEl(task, groupId) {
   const isRunning = task.id === state.activeTaskId;
   const li = document.createElement('li');
   li.className = `task-card${isRunning ? ' running' : ''}${state.globalPaused ? ' paused' : ''}`;
   li.dataset.taskId = task.id;
 
   li.innerHTML = `
+    <span class="drag-handle" aria-label="Réorganiser">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+        <line x1="4" y1="8" x2="20" y2="8"/>
+        <line x1="4" y1="14" x2="20" y2="14"/>
+      </svg>
+    </span>
     <div class="task-main">
       <span class="task-run-dot"></span>
       <span class="task-name">${esc(task.name)}</span>
@@ -406,9 +433,11 @@ function buildTaskEl(task) {
     </div>
   `;
 
-  /* Tap = start/pause */
+  /* Tap = start/pause (disabled in edit mode) */
   li.addEventListener('click', e => {
+    if (editMode) return;
     if (e.target.closest('.btn-edit-task') || e.target.closest('.btn-delete-task')) return;
+    if (e.target.closest('.drag-handle')) return;
     dispatch({ type: 'TAP_TASK', taskId: task.id });
   });
 
@@ -424,7 +453,76 @@ function buildTaskEl(task) {
     animateDelete(li, () => dispatch({ type: 'DELETE_TASK', taskId: task.id }));
   });
 
+  /* Drag handle — pointer-based reorder */
+  const handle = li.querySelector('.drag-handle');
+  handle.addEventListener('pointerdown', e => startTaskDrag(e, li, handle, groupId));
+
   return li;
+}
+
+function startTaskDrag(e, card, handle, groupId) {
+  if (!editMode) return;
+  e.preventDefault();
+  handle.setPointerCapture(e.pointerId);
+
+  const ul = card.parentElement;
+  const cards = Array.from(ul.querySelectorAll('.task-card'));
+  const startIdx = cards.indexOf(card);
+  if (startIdx === -1 || cards.length < 2) return;
+
+  const rects = cards.map(c => c.getBoundingClientRect());
+  const startY = e.clientY;
+  let currentIdx = startIdx;
+
+  card.classList.add('dragging');
+  cards.forEach((c, i) => { if (i !== startIdx) c.classList.add('shifting'); });
+
+  function onMove(ev) {
+    const dy = ev.clientY - startY;
+    card.style.transform = `translateY(${dy}px)`;
+
+    const draggedCenter = rects[startIdx].top + rects[startIdx].height / 2 + dy;
+
+    let newIdx = startIdx;
+    for (let i = 0; i < cards.length; i++) {
+      if (i === startIdx) continue;
+      const cc = rects[i].top + rects[i].height / 2;
+      if (i < startIdx && draggedCenter < cc) { newIdx = i; break; }
+      if (i > startIdx && draggedCenter > cc) { newIdx = i; }
+    }
+
+    if (newIdx !== currentIdx) {
+      currentIdx = newIdx;
+      for (let i = 0; i < cards.length; i++) {
+        if (i === startIdx) continue;
+        let shift = 0;
+        if (newIdx > startIdx && i > startIdx && i <= newIdx) shift = -rects[startIdx].height;
+        if (newIdx < startIdx && i >= newIdx && i < startIdx) shift =  rects[startIdx].height;
+        cards[i].style.transform = shift ? `translateY(${shift}px)` : '';
+      }
+    }
+  }
+
+  function cleanup() {
+    handle.removeEventListener('pointermove',  onMove);
+    handle.removeEventListener('pointerup',    onUp);
+    handle.removeEventListener('pointercancel', onUp);
+    card.classList.remove('dragging');
+    cards.forEach(c => { c.classList.remove('shifting'); c.style.transform = ''; });
+  }
+
+  function onUp() {
+    const fromIdx = startIdx;
+    const toIdx = currentIdx;
+    cleanup();
+    if (toIdx !== fromIdx) {
+      dispatch({ type: 'REORDER_TASKS', groupId, fromIndex: fromIdx, toIndex: toIdx });
+    }
+  }
+
+  handle.addEventListener('pointermove',  onMove);
+  handle.addEventListener('pointerup',    onUp);
+  handle.addEventListener('pointercancel', onUp);
 }
 
 /* ── Tracker timer-only update (every tick) ──────────────────────────────── */
@@ -809,8 +907,19 @@ function setupEvents() {
   /* Stats / back toggle */
   document.getElementById('btn-stats').addEventListener('click', () => {
     currentView = currentView === 'tracker' ? 'stats' : 'tracker';
+    if (currentView !== 'tracker' && editMode) {
+      editMode = false;
+      document.body.classList.remove('edit-mode');
+    }
     structureDirty = true;
     render();
+  });
+
+  /* Edit mode toggle */
+  document.getElementById('btn-edit-mode').addEventListener('click', () => {
+    editMode = !editMode;
+    document.body.classList.toggle('edit-mode', editMode);
+    updateHeader();
   });
 
   /* Add group */
